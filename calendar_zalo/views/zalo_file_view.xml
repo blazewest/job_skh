@@ -1,0 +1,62 @@
+<!-- views/zalo_file_view.xml -->
+<odoo>
+    <record id="view_zalo_file_form" model="ir.ui.view">
+        <field name="name">zalo.file.form</field>
+        <field name="model">zalo.file</field>
+        <field name="arch" type="xml">
+            <form string="Zalo File">
+                <sheet>
+                    <group>
+                        <field name="name" required="1"/>
+                        <field name="zalo_id"/>
+                        <field name="local_file" filename="name"/>
+                        <field name="file_token" readonly="1"/>
+                        <field name="response_data" readonly="1"/>
+                    </group>
+                    <div class="oe_note mt16">
+                        <p><strong>Lưu ý:</strong> File sau khi được upload sẽ tồn tại trên server Zalo tối đa 7 ngày. Sau thời gian này người dùng sẽ không thể xem lại.</p>
+                        <p><strong>Quota cho API:</strong><br/>
+                            - 5000 request/ ngày<br/>
+                            - 5000 request/ tuần<br/>
+                            - 5000 request/ tháng<br/>
+                            <br/>
+                            <strong>Chỉ hỗ trợ:</strong> PDF, DOC, DOCX. Kích thước tối đa: 5MB.<br/>
+                            <strong>Yêu cầu quyền:</strong> Gửi tin và thông báo qua OA
+                        </p>
+                    </div>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- views/zalo_file_view.xml (tiếp theo) -->
+    <record id="view_zalo_file_tree" model="ir.ui.view">
+        <field name="name">zalo.file.tree</field>
+        <field name="model">zalo.file</field>
+        <field name="arch" type="xml">
+            <list string="Danh sách file Zalo">
+                <field name="name"/>
+                <field name="zalo_id"/>
+                <field name="uploaded"/>
+                <field name="file_token"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_zalo_file" model="ir.actions.act_window">
+        <field name="name">Tệp Zalo</field>
+        <field name="res_model">zalo.file</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Chưa có tệp nào được tải lên.
+            </p>
+        </field>
+    </record>
+
+    <menuitem id="menu_zalo_file" name="Tệp Zalo"
+          parent="calendar.mail_menu_calendar" sequence="30"
+          action="action_zalo_file"
+    />
+
+</odoo>

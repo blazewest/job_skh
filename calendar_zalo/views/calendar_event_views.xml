@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data>
+        <record id="view_calendar_event_form_inherit_zalo" model="ir.ui.view">
+            <field name="name">calendar.event.form.inherit.zalo</field>
+            <field name="model">calendar.event</field>
+            <field name="inherit_id" ref="calendar.view_calendar_event_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//notebook" position="before">
+                    <group>
+                        <field name="zalo_file_id" domain="[('uploaded', '=', True)]"/>
+                        <field name="zalo_image_id" domain="[('uploaded', '=', True)]"/>
+                        <field name="image_preview" widget="image" readonly="1" invisible="not zalo_image_id"/>
+                    </group>
+                </xpath>
+            </field>
+        </record>
+    </data>
+</odoo>

@@ -1,0 +1,25 @@
+<odoo>
+    <data noupdate="1">
+        <record id="ir_cron_reupload_zalo_images" model="ir.cron">
+            <field name="name">Re-upload Zalo Images</field>
+            <field name="model_id" ref="model_zalo_image"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_reupload_zalo_images()</field>
+            <field name="interval_number">5</field>
+            <field name="interval_type">days</field>
+            <field name="active">True</field>
+        </record>
+
+        <record id="ir_cron_reupload_zalo_file" model="ir.cron">
+            <field name="name">Re-upload Zalo File</field>
+            <field name="model_id" ref="model_zalo_file"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_reupload_zalo_file()</field>
+            <field name="interval_number">5</field>
+            <field name="interval_type">days</field>
+            <field name="active">True</field>
+        </record>
+
+
+    </data>
+</odoo>
