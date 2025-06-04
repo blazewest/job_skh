@@ -201,14 +201,8 @@ class CalendarEvent(models.Model):
                 _logger.warning("Alarm ID %s không có access_token.", alarm.id)
                 continue
 
-            all_sent = True
-
             for user_id, name_user in zip(user_ids, name_users):
-                success = self._send_zalo_template_message(event, user_id, access_token, alarm.id, name_user)
-                if not success:
-                    all_sent = False
-
-            event.sent = all_sent
+                self._send_zalo_template_message(event, user_id, access_token, alarm.id, name_user)
 
     def _get_zalo_user_ids(self, event):
         """Lấy danh sách user Zalo từ attendee, gồm cả id_zalo và tên"""
@@ -300,13 +294,10 @@ class CalendarEvent(models.Model):
             self._log_zalo_result(event, user_id, res_json.get("error"), zalo_type="template")
             if res_json.get("error") != 0:
                 _logger.warning("Zalo API lỗi khi gửi template cho user_id %s: %s", user_id, res_json)
-                event.sent = False
             else:
                 _logger.info("Đã gửi template Zalo thành công cho user_id %s", user_id)
-                event.sent = True
         except requests.exceptions.RequestException as e:
             _logger.error("Lỗi kết nối khi gửi template Zalo đến user_id %s: %s", user_id, str(e))
-            event.sent = False
 
     def _send_zalo_file_if_available(self, event, user_id, access_token):
         """Gửi tệp tin nếu event có zalo_file_id"""
