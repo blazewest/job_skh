@@ -189,7 +189,7 @@ class CalendarEvent(models.Model):
 
         zalo_users = self._get_zalo_user_ids(event)
         user_ids = [u['id_zalo'] for u in zalo_users]
-        name_user = [u['name'] for u in zalo_users]
+        name_users = [u['name'] for u in zalo_users]
 
         if not user_ids:
             _logger.warning("Không có Zalo user_id trong attendee cho sự kiện ID %s", event.id)
@@ -201,8 +201,8 @@ class CalendarEvent(models.Model):
                 _logger.warning("Alarm ID %s không có access_token.", alarm.id)
                 continue
 
-            for user_id in user_ids:
-                self._send_zalo_template_message(event, user_id, access_token, alarm.id,name_user)
+            for user_id, name_user in zip(user_ids, name_users):
+                self._send_zalo_template_message(event, user_id, access_token, alarm.id, name_user)
 
     def _get_zalo_user_ids(self, event):
         """Lấy danh sách user Zalo từ attendee, gồm cả id_zalo và tên"""
