@@ -201,8 +201,14 @@ class CalendarEvent(models.Model):
                 _logger.warning("Alarm ID %s không có access_token.", alarm.id)
                 continue
 
+            all_sent = True
+
             for user_id, name_user in zip(user_ids, name_users):
-                self._send_zalo_template_message(event, user_id, access_token, alarm.id, name_user)
+                success = self._send_zalo_template_message(event, user_id, access_token, alarm.id, name_user)
+                if not success:
+                    all_sent = False
+
+            event.sent = all_sent
 
     def _get_zalo_user_ids(self, event):
         """Lấy danh sách user Zalo từ attendee, gồm cả id_zalo và tên"""
