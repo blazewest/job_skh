@@ -187,7 +187,10 @@ class CalendarEvent(models.Model):
             _logger.info("Không có alarm Zalo cho sự kiện ID %s", event.id)
             return
 
-        user_ids = self._get_zalo_user_ids(event)
+        zalo_users = self._get_zalo_user_ids(event)
+        user_ids = [u['id_zalo'] for u in zalo_users]
+        name_user = [u['name'] for u in zalo_users]
+
         if not user_ids:
             _logger.warning("Không có Zalo user_id trong attendee cho sự kiện ID %s", event.id)
             return
@@ -199,26 +202,26 @@ class CalendarEvent(models.Model):
                 continue
 
             for user_id in user_ids:
-                self._send_zalo_template_message(event, user_id, access_token, alarm.id)
+                self._send_zalo_template_message(event, user_id, access_token, alarm.id,name_user)
 
     def _get_zalo_user_ids(self, event):
-        """Lấy danh sách user_id Zalo từ attendee"""
-        return [uid for uid in event.attendee_ids.mapped('partner_id.id_zalo') if uid]
+        """Lấy danh sách user Zalo từ attendee, gồm cả id_zalo và tên"""
+        return [
+            {'id_zalo': partner.id_zalo, 'name': partner.name}
+            for partner in event.attendee_ids.mapped('partner_id')
+            if partner.id_zalo
+        ]
 
-    def _send_zalo_template_message(self, event, user_id, access_token, alarm_id):
+    def _send_zalo_template_message(self, event, user_id, access_token, alarm_id,name_user):
         """Gửi tin nhắn template sự kiện Zalo"""
-
         from datetime import timedelta
-
         elements = []
-
         # Nếu có ảnh, thêm ảnh vào đầu message
         if event.zalo_image_id:
             elements.append({
                 "attachment_id": event.zalo_image_id.image_url,
                 "type": "banner"
             })
-
         # Nội dung chính
         elements += [
             {
@@ -231,7 +234,7 @@ class CalendarEvent(models.Model):
                 "content": [
                     {"key": "Mã Cuộc Họp", "value": str(event.id)},
                     {"key": "Đồng chí",
-                     "value": user_id.name or "Không rõ"},
+                     "value": name_user or "Không rõ"},
                     {"key": "Thời gian bắt đầu",
                      "value": (event.start + timedelta(hours=7)).strftime('%H:%M %d-%m-%Y')},
                     {"key": "Địa điểm", "value": event.location or ""},
