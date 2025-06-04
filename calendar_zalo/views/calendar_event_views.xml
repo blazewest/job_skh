@@ -11,6 +11,8 @@
                         <field name="zalo_file_id" domain="[('uploaded', '=', True)]"/>
                         <field name="zalo_image_id" domain="[('uploaded', '=', True)]"/>
                         <field name="image_preview" widget="image" readonly="1" invisible="not zalo_image_id"/>
+                        <field name="modify" readonly="1"/>
+                        <field name="sent" readonly="1"/>
                     </group>
                 </xpath>
             </field>
