@@ -120,8 +120,8 @@ class Meeting(models.Model):
         return start + timedelta(hours=duration_hours)
 
     # description
-    name = fields.Char('Meeting Subject', required=True)
-    description = fields.Char('Description', size=100)
+    name = fields.Char('Meeting Subject', required=True, tracking=True)
+    description = fields.Char('Description', size=100, tracking=True)
     user_id = fields.Many2one('res.users', 'Organizer', default=lambda self: self.env.user)
     partner_id = fields.Many2one(
         'res.partner', string='Scheduled by', related='user_id.partner_id', readonly=True)
