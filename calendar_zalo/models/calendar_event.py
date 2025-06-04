@@ -294,13 +294,13 @@ class CalendarEvent(models.Model):
             self._log_zalo_result(event, user_id, res_json.get("error"), zalo_type="template")
             if res_json.get("error") != 0:
                 _logger.warning("Zalo API lỗi khi gửi template cho user_id %s: %s", user_id, res_json)
-                self.sent = False
+                event.sent = False
             else:
                 _logger.info("Đã gửi template Zalo thành công cho user_id %s", user_id)
-                self.sent = True
+                event.sent = True
         except requests.exceptions.RequestException as e:
             _logger.error("Lỗi kết nối khi gửi template Zalo đến user_id %s: %s", user_id, str(e))
-            self.sent = False
+            event.sent = False
 
     def _send_zalo_file_if_available(self, event, user_id, access_token):
         """Gửi tệp tin nếu event có zalo_file_id"""
