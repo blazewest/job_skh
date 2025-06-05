@@ -305,6 +305,11 @@ class CalendarEvent(models.Model):
                 "align": "left"
             },
             {
+                "type": "text",
+                "align": "left",
+                "content": "Thông tin được gửi bởi hệ thống quản lý lịch của <br>Trung tâm Công Nghệ và Nền Tảng Số tỉnh Điện Biên"
+            },
+            {
                 "type": "table",
                 "content": [
                     {"key": "Mã Cuộc Họp", "value": str(event.id)},
