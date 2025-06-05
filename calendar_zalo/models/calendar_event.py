@@ -301,7 +301,7 @@ class CalendarEvent(models.Model):
         elements += [
             {
                 "type": "header",
-                "content": f"Nhắc sự kiện: {event.name}" + (" (sửa đổi)" if event.modify else ""),
+                "content": f"{'Nhắc sự kiện' if event.sent else 'Sự Kiện'}: {event.name}" + (" (sửa đổi)" if event.modify else ""),
                 "align": "left"
             },
             {
