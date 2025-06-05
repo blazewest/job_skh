@@ -120,13 +120,24 @@ class CalendarEvent(models.Model):
         return event
 
     def write(self, vals):
-        # Kiểm tra xem 'sent' có được thay đổi thành True không
-        if 'sent' in vals and vals['sent']:
-            # Đặt 'modify' thành True cho tất cả các bản ghi được cập nhật
-            vals['modify'] = True
+        # Cờ tạm để tránh đệ quy
+        avoid_recursion = self.env.context.get('avoid_modify_recursion', False)
 
         res = super().write(vals)
-        self._create_zalo_crons()
+
+        if avoid_recursion:
+            return res
+
+        for record in self:
+            other_fields = set(vals.keys()) - {'sent'}
+
+            if other_fields and record.sent is True:
+                # Gọi write nhưng truyền context tránh recursion
+                record.with_context(avoid_modify_recursion=True).write({'modify': True})
+
+            if other_fields:
+                record._create_zalo_crons()
+
         return res
 
     def _compute_alarm_cron_time(self, event_start, duration, interval):
@@ -145,41 +156,50 @@ class CalendarEvent(models.Model):
         model = self.env['ir.model']._get('calendar.event')
 
         for event in self:
-            # Xóa cron cũ (tránh trùng)
-            old_crons = cron_model.search([
-                ('model_id', '=', model.id),
-                ('code', 'like', f"model.action_push_zalo({event.id})")
-            ])
-            old_crons.unlink()
-
-            # Lọc các alarm zalo
             zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
 
             for alarm in zalo_alarms:
-                # Tính thời điểm gửi = start - (duration x interval)
                 alarm_time = self._compute_alarm_cron_time(
                     event.start,
                     alarm.duration,
                     alarm.interval
                 )
 
-                cron_model.create({
-                    'name': f"Zalo Reminder for Event {event.id} - Alarm {alarm.id}",
-                    'model_id': model.id,
-                    'state': 'code',
-                    'code': f"model.action_push_zalo({event.id}) or None",
-                    'interval_number': 1,
-                    'interval_type': 'months',
-                    'nextcall': alarm_time,
-                    'active': True,
-                    'priority': 1,
-                })
+                code_str = f"model.action_push_zalo({event.id}) or None"
+
+                # Tìm cron hiện tại (nếu có)
+                existing_cron = cron_model.search([
+                    ('model_id', '=', model.id),
+                    ('code', '=', code_str)
+                ], limit=1)
+
+                if existing_cron:
+                    # Cập nhật thời gian nếu cần
+                    existing_cron.write({
+                        'nextcall': alarm_time,
+                        'active': True,
+                    })
+                    _logger.info("🛠️ Cập nhật cron ID %s cho event ID %s", existing_cron.id, event.id)
+                else:
+                    # Tạo mới nếu chưa có
+                    cron_model.create({
+                        'name': f"Zalo Reminder for Event {event.id} - Alarm {alarm.id}",
+                        'model_id': model.id,
+                        'state': 'code',
+                        'code': code_str,
+                        'interval_number': 1,
+                        'interval_type': 'months',
+                        'nextcall': alarm_time,
+                        'active': True,
+                        'priority': 1,
+                    })
+                    _logger.info("✅ Tạo mới cron cho event ID %s", event.id)
 
     def action_push_zalo(self, event_id):
         """Gửi thông báo Zalo từ các alarm có alarm_type='zalo'"""
 
-        event = self.browse(event_id)
-        if not event:
+        event = self.sudo().browse(event_id)
+        if not event.exists():
             raise UserError("Sự kiện không tồn tại.")
 
         zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
@@ -195,14 +215,29 @@ class CalendarEvent(models.Model):
             _logger.warning("Không có Zalo user_id trong attendee cho sự kiện ID %s", event.id)
             return
 
+        success = True
+
         for alarm in zalo_alarms:
             access_token = alarm.zalo_id.access_token
             if not access_token:
                 _logger.warning("Alarm ID %s không có access_token.", alarm.id)
+                success = False
                 continue
 
             for user_id, name_user in zip(user_ids, name_users):
-                self._send_zalo_template_message(event, user_id, access_token, alarm.id, name_user)
+                result = self._send_zalo_template_message(event, user_id, access_token, alarm.id, name_user)
+                if not result:
+                    success = False
+
+        if success:
+            _logger.info("✅ Gửi thành công cho tất cả user, cập nhật sent=True")
+
+            # Đọc lại event để tránh lỗi record bị mất context khi chạy trong cron
+            fresh_event = self.env['calendar.event'].sudo().browse(event.id)
+            if fresh_event.exists():
+                fresh_event.write({'sent': True})
+            else:
+                _logger.warning("❌ Không thể cập nhật sent=True vì event không còn tồn tại")
 
     def _get_zalo_user_ids(self, event):
         """Lấy danh sách user Zalo từ attendee, gồm cả id_zalo và tên"""
@@ -265,7 +300,8 @@ class CalendarEvent(models.Model):
                             {
                                 "title": "Chi tiết sự kiện",
                                 "type": "oa.open.url",
-                                "payload": {"url": event_url}
+                                "payload": {"url": "https://github.com/"}
+                                # "payload": {"url": event_url}
                             }
                         ]
                     }
@@ -277,7 +313,8 @@ class CalendarEvent(models.Model):
             payload["message"]["attachment"]["payload"]["buttons"].append({
                 "title": "Lấy tệp đính kèm",
                 "type": "oa.open.url",
-                "payload": {"url": url_controller}
+                "payload": {"url": "https://github.com/"}
+                # "payload": {"url": url_controller}
             })
 
         try:
@@ -294,10 +331,14 @@ class CalendarEvent(models.Model):
             self._log_zalo_result(event, user_id, res_json.get("error"), zalo_type="template")
             if res_json.get("error") != 0:
                 _logger.warning("Zalo API lỗi khi gửi template cho user_id %s: %s", user_id, res_json)
+                return False
             else:
                 _logger.info("Đã gửi template Zalo thành công cho user_id %s", user_id)
+                return True
         except requests.exceptions.RequestException as e:
             _logger.error("Lỗi kết nối khi gửi template Zalo đến user_id %s: %s", user_id, str(e))
+            return False
+
 
     def _send_zalo_file_if_available(self, event, user_id, access_token):
         """Gửi tệp tin nếu event có zalo_file_id"""
@@ -339,6 +380,7 @@ class CalendarEvent(models.Model):
         except requests.exceptions.RequestException as e:
             _logger.error("Lỗi gửi file Zalo user_id %s: %s", user_id, str(e))
 
+
     def _log_zalo_result(self, event, user_id, error_code, zalo_type):
         """Ghi log kết quả gửi Zalo vào bảng zalo.log"""
         message = _LOG_API_ZALO.get(str(error_code), "Không rõ lỗi")
@@ -350,6 +392,92 @@ class CalendarEvent(models.Model):
             'event_id': event.id,
             'zalo_type': zalo_type
         })
+
+    def unlink(self):
+        for event in self:
+            if event.sent:
+                zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
+                if not zalo_alarms:
+                    _logger.info(f"Sự kiện ID {event.id} không có alarm zalo, bỏ qua gửi thông báo hủy.")
+                else:
+                    zalo_users = self._get_zalo_user_ids(event)
+                    user_ids = [u['id_zalo'] for u in zalo_users]
+                    name_users = [u['name'] for u in zalo_users]
+
+                    if not user_ids:
+                        _logger.warning(f"Không có Zalo user_id trong attendee cho sự kiện ID {event.id}")
+                    else:
+                        for alarm in zalo_alarms:
+                            access_token = alarm.zalo_id.access_token
+                            if not access_token:
+                                _logger.warning(f"Alarm ID {alarm.id} không có access_token.")
+                                continue
+
+                            for user_id, name_user in zip(user_ids, name_users):
+                                success = self._send_zalo_template_message_cancel(event, user_id, access_token,
+                                                                                  name_user)
+                                if success:
+                                    _logger.info(f"Đã gửi thông báo hủy sự kiện ID {event.id} đến user_id {user_id}")
+                                else:
+                                    _logger.warning(
+                                        f"Lỗi khi gửi thông báo hủy sự kiện ID {event.id} đến user_id {user_id}")
+
+        return super().unlink()
+
+    def _send_zalo_template_message_cancel(self, event, user_id, access_token, name_user):
+        """Gửi tin nhắn template thông báo hủy sự kiện khi event sắp bị xóa"""
+        elements = [
+            {
+                "type": "header",
+                "content": f"Hủy sự kiện: {event.name}",
+                "align": "left"
+            },
+            {
+                "type": "table",
+                "content": [
+                    {"key": "Mã Cuộc Họp", "value": str(event.id)},
+                    {"key": "Người nhận", "value": name_user or "Không rõ"},
+                    {"key": "Thông báo", "value": "Sự kiện đã bị hủy"},
+                ]
+            }
+        ]
+
+        base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
+
+        payload = {
+            "recipient": {"user_id": user_id},
+            "message": {
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "transaction_booking",
+                        "language": "VI",
+                        "elements": elements,
+                    }
+                }
+            }
+        }
+
+        import requests
+        try:
+            response = requests.post(
+                url="https://openapi.zalo.me/v3.0/oa/message/transaction",
+                headers={
+                    "access_token": access_token,
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                timeout=10
+            )
+            res_json = response.json()
+            if res_json.get("error") != 0:
+                _logger.warning("Zalo API lỗi khi gửi template hủy cho user_id %s: %s", user_id, res_json)
+                return False
+            else:
+                return True
+        except requests.exceptions.RequestException as e:
+            _logger.error("Lỗi kết nối khi gửi template hủy Zalo đến user_id %s: %s", user_id, str(e))
+            return False
 
 
 
