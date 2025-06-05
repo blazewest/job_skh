@@ -165,9 +165,10 @@ class CalendarEvent(models.Model):
                     alarm.interval
                 )
 
-                code_str = f"model.action_push_zalo({event.id}) or None"
+                # Truyền alarm.id vào code gọi
+                code_str = f"model.action_push_zalo({event.id}, {alarm.id}) or None"
 
-                # Tìm cron hiện tại (nếu có)
+                # Tìm cron hiện tại (nếu có) theo event và alarm id
                 existing_cron = cron_model.search([
                     ('model_id', '=', model.id),
                     ('code', '=', code_str)
@@ -179,7 +180,8 @@ class CalendarEvent(models.Model):
                         'nextcall': alarm_time,
                         'active': True,
                     })
-                    _logger.info("🛠️ Cập nhật cron ID %s cho event ID %s", existing_cron.id, event.id)
+                    _logger.info("🛠️ Cập nhật cron ID %s cho event ID %s, alarm ID %s", existing_cron.id, event.id,
+                                 alarm.id)
                 else:
                     # Tạo mới nếu chưa có
                     cron_model.create({
@@ -193,16 +195,20 @@ class CalendarEvent(models.Model):
                         'active': True,
                         'priority': 1,
                     })
-                    _logger.info("✅ Tạo mới cron cho event ID %s", event.id)
+                    _logger.info("✅ Tạo mới cron cho event ID %s, alarm ID %s", event.id, alarm.id)
 
-    def action_push_zalo(self, event_id):
+    def action_push_zalo(self, event_id, alarm_id=None):
         """Gửi thông báo Zalo từ các alarm có alarm_type='zalo'"""
 
         event = self.sudo().browse(event_id)
         if not event.exists():
             raise UserError("Sự kiện không tồn tại.")
 
-        zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
+        if alarm_id:
+            zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo' and a.id == alarm_id)
+        else:
+            zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
+
         if not zalo_alarms:
             _logger.info("Không có alarm Zalo cho sự kiện ID %s", event.id)
             return
@@ -232,7 +238,6 @@ class CalendarEvent(models.Model):
         if success:
             _logger.info("✅ Gửi thành công cho tất cả user, cập nhật sent=True")
 
-            # Đọc lại event để tránh lỗi record bị mất context khi chạy trong cron
             fresh_event = self.env['calendar.event'].sudo().browse(event.id)
             if fresh_event.exists():
                 fresh_event.write({'sent': True})
@@ -247,7 +252,7 @@ class CalendarEvent(models.Model):
             if partner.id_zalo
         ]
 
-    def _send_zalo_template_message(self, event, user_id, access_token, alarm_id,name_user):
+    def _send_zalo_template_message(self, event, user_id, access_token, alarm_id, name_user):
         """Gửi tin nhắn template sự kiện Zalo"""
         from datetime import timedelta
         elements = []
@@ -268,8 +273,7 @@ class CalendarEvent(models.Model):
                 "type": "table",
                 "content": [
                     {"key": "Mã Cuộc Họp", "value": str(event.id)},
-                    {"key": "Đồng chí",
-                     "value": name_user or "Không rõ"},
+                    {"key": "Đồng chí", "value": name_user or "Không rõ"},
                     {"key": "Thời gian bắt đầu",
                      "value": (event.start + timedelta(hours=7)).strftime('%H:%M %d-%m-%Y')},
                     {"key": "Địa điểm", "value": event.location or ""},
@@ -300,8 +304,7 @@ class CalendarEvent(models.Model):
                             {
                                 "title": "Chi tiết sự kiện",
                                 "type": "oa.open.url",
-                                "payload": {"url": "https://github.com/"}
-                                # "payload": {"url": event_url}
+                                "payload": {"url": event_url}
                             }
                         ]
                     }
@@ -313,11 +316,11 @@ class CalendarEvent(models.Model):
             payload["message"]["attachment"]["payload"]["buttons"].append({
                 "title": "Lấy tệp đính kèm",
                 "type": "oa.open.url",
-                "payload": {"url": "https://github.com/"}
-                # "payload": {"url": url_controller}
+                "payload": {"url": url_controller}
             })
 
         try:
+            import requests
             response = requests.post(
                 url="https://openapi.zalo.me/v3.0/oa/message/transaction",
                 headers={
@@ -338,7 +341,6 @@ class CalendarEvent(models.Model):
         except requests.exceptions.RequestException as e:
             _logger.error("Lỗi kết nối khi gửi template Zalo đến user_id %s: %s", user_id, str(e))
             return False
-
 
     def _send_zalo_file_if_available(self, event, user_id, access_token):
         """Gửi tệp tin nếu event có zalo_file_id"""
@@ -394,6 +396,9 @@ class CalendarEvent(models.Model):
         })
 
     def unlink(self):
+        cron_model = self.env['ir.cron']
+        model = self.env['ir.model']._get('calendar.event')
+
         for event in self:
             if event.sent:
                 zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
@@ -421,6 +426,18 @@ class CalendarEvent(models.Model):
                                 else:
                                     _logger.warning(
                                         f"Lỗi khi gửi thông báo hủy sự kiện ID {event.id} đến user_id {user_id}")
+            else:
+                # Xoá cron nếu chưa gửi
+                zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
+                for alarm in zalo_alarms:
+                    code_str = f"model.action_push_zalo({event.id}, {alarm.id}) or None"
+                    existing_cron = cron_model.search([
+                        ('model_id', '=', model.id),
+                        ('code', '=', code_str)
+                    ])
+                    if existing_cron:
+                        _logger.info(f"🗑️ Xoá {len(existing_cron)} cron của sự kiện ID {event.id}, alarm ID {alarm.id}")
+                        existing_cron.unlink()
 
         return super().unlink()
 
