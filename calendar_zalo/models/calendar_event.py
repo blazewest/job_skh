@@ -198,7 +198,7 @@ class CalendarEvent(models.Model):
                     _logger.info("✅ Tạo mới cron cho event ID %s, alarm ID %s", event.id, alarm.id)
 
     def action_push_zalo(self, event_id, alarm_id=None):
-        """Gửi thông báo Zalo từ các alarm có alarm_type='zalo'"""
+        """Gửi thông báo Zalo từ các alarm có alarm_type='zalo' và đánh dấu cron cần xóa"""
 
         event = self.sudo().browse(event_id)
         if not event.exists():
@@ -235,14 +235,49 @@ class CalendarEvent(models.Model):
                 if not result:
                     success = False
 
+            # ✅ Đánh dấu cần xóa cron, KHÔNG xóa hoặc tắt cron tại đây
+            model = self.env['ir.model']._get('calendar.event')
+            code_str = f"model.action_push_zalo({event.id}, {alarm.id}) or None"
+            name_str = f"Zalo Reminder for Event {event.id} - Alarm {alarm.id}"
+
+            cron = self.env['ir.cron'].search([
+                ('model_id', '=', model.id),
+                ('code', '=', code_str),
+                ('name', '=', name_str),
+            ], limit=1)
+
+            if cron:
+                self.env['calendar.event.cron.cleanup'].sudo().create({
+                    'cron_name': name_str,
+                    'cron_id': cron.id,
+                    'event_id': event.id,
+                    'alarm_id': alarm.id,
+                    'state': 'pending'
+                })
+
         if success:
             _logger.info("✅ Gửi thành công cho tất cả user, cập nhật sent=True")
-
             fresh_event = self.env['calendar.event'].sudo().browse(event.id)
             if fresh_event.exists():
                 fresh_event.write({'sent': True})
             else:
                 _logger.warning("❌ Không thể cập nhật sent=True vì event không còn tồn tại")
+
+    def cleanup_zalo_crons(self):
+        """Xóa các cron Zalo đã đánh dấu là pending"""
+        cleanup_model = self.env['calendar.event.cron.cleanup']
+        pending = cleanup_model.search([('state', '=', 'pending')])
+        for rec in pending:
+            try:
+                if rec.cron_id and rec.cron_id.exists():
+                    rec.cron_id.unlink()
+                    rec.write({'state': 'done'})
+                    _logger.info("🧹 Đã xóa cron: %s", rec.cron_name)
+                else:
+                    rec.write({'state': 'done'})
+            except Exception as e:
+                rec.write({'state': 'failed', 'error_message': str(e)})
+                _logger.error("❌ Lỗi khi xóa cron: %s - %s", rec.cron_name, e)
 
     def _get_zalo_user_ids(self, event):
         """Lấy danh sách user Zalo từ attendee, gồm cả id_zalo và tên"""
@@ -300,13 +335,13 @@ class CalendarEvent(models.Model):
                         "template_type": "transaction_booking",
                         "language": "VI",
                         "elements": elements,
-                        "buttons": [
-                            {
-                                "title": "Chi tiết sự kiện",
-                                "type": "oa.open.url",
-                                "payload": {"url": event_url}
-                            }
-                        ]
+                        # "buttons": [
+                        #     {
+                        #         "title": "Chi tiết sự kiện",
+                        #         "type": "oa.open.url",
+                        #         "payload": {"url": event_url}
+                        #     }
+                        # ]
                     }
                 }
             }

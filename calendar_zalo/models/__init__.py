@@ -7,3 +7,4 @@ from . import zalo_image
 from . import zalo_file
 from . import hr_employee
 from . import res_partner
+from . import calendar_event_cron_cleanup
