@@ -434,11 +434,16 @@ class CalendarEvent(models.Model):
         cron_model = self.env['ir.cron']
         model = self.env['ir.model']._get('calendar.event')
 
+        already_notified_event_ids = set()  # để đảm bảo không gửi 2 lần
+
         for event in self:
+            zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
+
             if event.sent:
-                zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
                 if not zalo_alarms:
                     _logger.info(f"Sự kiện ID {event.id} không có alarm zalo, bỏ qua gửi thông báo hủy.")
+                elif event.id in already_notified_event_ids:
+                    _logger.info(f"Sự kiện ID {event.id} đã gửi tin nhắn huỷ trước đó, bỏ qua.")
                 else:
                     zalo_users = self._get_zalo_user_ids(event)
                     user_ids = [u['id_zalo'] for u in zalo_users]
@@ -454,16 +459,20 @@ class CalendarEvent(models.Model):
                                 continue
 
                             for user_id, name_user in zip(user_ids, name_users):
-                                success = self._send_zalo_template_message_cancel(event, user_id, access_token,
-                                                                                  name_user)
+                                success = self._send_zalo_template_message_cancel(
+                                    event, user_id, access_token, name_user
+                                )
                                 if success:
-                                    _logger.info(f"Đã gửi thông báo hủy sự kiện ID {event.id} đến user_id {user_id}")
+                                    _logger.info(
+                                        f"Đã gửi thông báo hủy sự kiện ID {event.id} đến user_id {user_id}"
+                                    )
                                 else:
                                     _logger.warning(
-                                        f"Lỗi khi gửi thông báo hủy sự kiện ID {event.id} đến user_id {user_id}")
+                                        f"Lỗi khi gửi thông báo hủy sự kiện ID {event.id} đến user_id {user_id}"
+                                    )
+                    already_notified_event_ids.add(event.id)
             else:
                 # Xoá cron nếu chưa gửi
-                zalo_alarms = event.alarm_ids.filtered(lambda a: a.alarm_type == 'zalo')
                 for alarm in zalo_alarms:
                     code_str = f"model.action_push_zalo({event.id}, {alarm.id}) or None"
                     existing_cron = cron_model.search([
@@ -473,7 +482,6 @@ class CalendarEvent(models.Model):
                     if existing_cron:
                         _logger.info(f"🗑️ Xoá {len(existing_cron)} cron của sự kiện ID {event.id}, alarm ID {alarm.id}")
                         existing_cron.unlink()
-
         return super().unlink()
 
     def _send_zalo_template_message_cancel(self, event, user_id, access_token, name_user):
