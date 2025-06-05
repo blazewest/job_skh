@@ -335,13 +335,13 @@ class CalendarEvent(models.Model):
                         "template_type": "transaction_booking",
                         "language": "VI",
                         "elements": elements,
-                        # "buttons": [
-                        #     {
-                        #         "title": "Chi tiết sự kiện",
-                        #         "type": "oa.open.url",
-                        #         "payload": {"url": event_url}
-                        #     }
-                        # ]
+                        "buttons": [
+                            {
+                                "title": "Chi tiết sự kiện",
+                                "type": "oa.open.url",
+                                "payload": {"url": event_url}
+                            }
+                        ]
                     }
                 }
             }
